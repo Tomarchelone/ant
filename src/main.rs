@@ -5,9 +5,13 @@ pub mod lib_ant;
 
 use lib_ant::*;
 
+// типаж, который рисует доску с муравьём
+// Новад доска с новыми правилами
+
 pub fn main() {
     // hardcoded for now TODO: get it from somewhere!
     let screen_resolution = (1920.0, 1080.0);
+    let short_dim = 20;
 
     let mut c = conf::Conf::new();
     let mut window_mode = c.window_mode;
@@ -21,7 +25,7 @@ pub fn main() {
 
     let (ref mut ctx, ref mut event_loop) = ContextBuilder::new("Ant", "Tomarchelone")
         .conf(c).build().unwrap();
-    let state = &mut State::new(ctx);
+    let state = &mut State::new(ctx, short_dim);
 
     event::run(ctx, event_loop, state).unwrap();
 

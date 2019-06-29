@@ -1,7 +1,9 @@
 use ggez::*;
 use std::collections::HashSet;
 use ggez::{nalgebra as na};
-use ggez::graphics::{self, DrawMode, MeshBuilder, Mesh};
+use ggez::graphics::{self, DrawMode, Mesh};
+use ggez::event::{EventHandler, KeyCode, KeyMods};
+use ggez::input::keyboard;
 
 const PURPLE: [f32; 4] = [0.4, 0.0, 0.2, 1.0];
 const PAPER: [f32; 4] = [0.8, 0.8, 0.6, 1.0];
@@ -26,6 +28,14 @@ struct Assets {
     white_cell: Mesh,
     right_roads: Mesh,
     left_roads: Mesh,
+    down_left: Mesh,
+    down_right: Mesh,
+    up_left: Mesh,
+    up_right: Mesh,
+    left_down: Mesh,
+    left_up: Mesh,
+    right_down: Mesh,
+    right_up: Mesh,
 }
 
 pub struct Screen {
@@ -34,12 +44,11 @@ pub struct Screen {
     dim: (i64, i64),
     cell_size: f32,
     center_coord: (i64, i64),
-    steps_per_frame: u64,
 }
 
-pub enum Stage {
-    Initial,
-    Run,
+pub enum Mode {
+    Stream(u64),
+    StepByStep,
 }
 
 enum Cells {
@@ -52,8 +61,15 @@ pub struct Update {
     ant: bool,
 }
 
+pub struct Buttons {
+    space: bool,
+    right: bool,
+    left: bool,
+}
+
 pub struct State {
-    stage: Stage,
+    mode: Mode,
+    buttons: Buttons,
     screen: Screen,
     update: Update,
     board: HashSet<(i64, i64)>,
@@ -61,10 +77,9 @@ pub struct State {
 }
 
 impl State {
-    pub fn new(ctx: &mut Context) -> Self {
+    pub fn new(ctx: &mut Context, short_dim: i64) -> Self {
         let window_resolution = (ctx.conf.window_mode.width, ctx.conf.window_mode.height);
         let pix_dim = (window_resolution.0, window_resolution.1);
-        let short_dim = 20;
         let long_dim = (short_dim as f32 * (pix_dim.0 / pix_dim.1)) as i64;
         let dim = (long_dim, short_dim);
         let cell_size = pix_dim.0 / dim.0 as f32;
@@ -130,20 +145,224 @@ impl State {
         ).unwrap()
         .build(ctx).unwrap();
 
+        let down_left = ggez::graphics::MeshBuilder::new()
+        .line(
+            &[na::Point2::new(cell_size / 2.0, cell_size),
+              na::Point2::new(0.0, cell_size / 2.0)
+            ]
+            , 4.0
+            , RED.into()
+        ).unwrap()
+        .line(
+            &[na::Point2::new(0.0, cell_size * 0.5),
+              na::Point2::new(cell_size * 0.25, cell_size * 0.5)
+            ]
+            , 4.0
+            , RED.into()
+        ).unwrap()
+        .line(
+            &[na::Point2::new(0.0, cell_size * 0.5),
+              na::Point2::new(0.0, cell_size * 0.75)
+            ]
+            , 4.0
+            , RED.into()
+        ).unwrap()
+        .build(ctx).unwrap();
+
+        let down_right = ggez::graphics::MeshBuilder::new()
+        .line(
+            &[na::Point2::new(cell_size / 2.0, cell_size),
+              na::Point2::new(cell_size, cell_size / 2.0)
+            ]
+            , 4.0
+            , RED.into()
+        ).unwrap()
+        .line(
+            &[na::Point2::new(cell_size * 0.75, cell_size / 2.0),
+              na::Point2::new(cell_size, cell_size / 2.0)
+            ]
+            , 4.0
+            , RED.into()
+        ).unwrap()
+        .line(
+            &[na::Point2::new(cell_size, cell_size * 0.75),
+              na::Point2::new(cell_size, cell_size / 2.0)
+            ]
+            , 4.0
+            , RED.into()
+        ).unwrap()
+        .build(ctx).unwrap();
+
+        let up_right = ggez::graphics::MeshBuilder::new()
+        .line(
+            &[na::Point2::new(cell_size / 2.0, 0.0),
+              na::Point2::new(cell_size, cell_size / 2.0)
+            ]
+            , 4.0
+            , RED.into()
+        ).unwrap()
+        .line(
+            &[na::Point2::new(cell_size, cell_size * 0.5),
+              na::Point2::new(cell_size, cell_size * 0.25)
+            ]
+            , 4.0
+            , RED.into()
+        ).unwrap()
+        .line(
+            &[na::Point2::new(cell_size, cell_size * 0.5),
+              na::Point2::new(cell_size * 0.75, cell_size * 0.5)
+            ]
+            , 4.0
+            , RED.into()
+        ).unwrap()
+        .build(ctx).unwrap();
+
+        let up_left = ggez::graphics::MeshBuilder::new()
+        .line(
+            &[na::Point2::new(cell_size / 2.0, 0.0),
+              na::Point2::new(0.0, cell_size / 2.0)
+            ]
+            , 4.0
+            , RED.into()
+        ).unwrap()
+        .line(
+            &[na::Point2::new(0.0, cell_size * 0.5),
+              na::Point2::new(0.0, cell_size * 0.25)
+            ]
+            , 4.0
+            , RED.into()
+        ).unwrap()
+        .line(
+            &[na::Point2::new(0.0, cell_size * 0.5),
+              na::Point2::new(cell_size * 0.25, cell_size * 0.5)
+            ]
+            , 4.0
+            , RED.into()
+        ).unwrap()
+        .build(ctx).unwrap();
+
+        let left_down = ggez::graphics::MeshBuilder::new()
+        .line(
+            &[na::Point2::new(0.0, cell_size * 0.5),
+              na::Point2::new(cell_size * 0.5, cell_size)
+            ]
+            , 4.0
+            , RED.into()
+        ).unwrap()
+        .line(
+            &[na::Point2::new(cell_size * 0.5, cell_size),
+              na::Point2::new(cell_size * 0.25, cell_size)
+            ]
+            , 4.0
+            , RED.into()
+        ).unwrap()
+        .line(
+            &[na::Point2::new(cell_size * 0.5, cell_size),
+              na::Point2::new(cell_size * 0.5, cell_size * 0.75)
+            ]
+            , 4.0
+            , RED.into()
+        ).unwrap()
+        .build(ctx).unwrap();
+
+        let left_up = ggez::graphics::MeshBuilder::new()
+        .line(
+            &[na::Point2::new(0.0, cell_size * 0.5),
+              na::Point2::new(cell_size * 0.5, 0.0)
+            ]
+            , 4.0
+            , RED.into()
+        ).unwrap()
+        .line(
+            &[na::Point2::new(cell_size * 0.5, 0.0),
+              na::Point2::new(cell_size * 0.25, 0.0)
+            ]
+            , 4.0
+            , RED.into()
+        ).unwrap()
+        .line(
+            &[na::Point2::new(cell_size * 0.5, 0.0),
+              na::Point2::new(cell_size * 0.5, cell_size * 0.25)
+            ]
+            , 4.0
+            , RED.into()
+        ).unwrap()
+        .build(ctx).unwrap();
+
+        let right_down = ggez::graphics::MeshBuilder::new()
+        .line(
+            &[na::Point2::new(cell_size, cell_size * 0.5),
+              na::Point2::new(cell_size * 0.5, cell_size)
+            ]
+            , 4.0
+            , RED.into()
+        ).unwrap()
+        .line(
+            &[na::Point2::new(cell_size * 0.5, cell_size),
+              na::Point2::new(cell_size * 0.75, cell_size)
+            ]
+            , 4.0
+            , RED.into()
+        ).unwrap()
+        .line(
+            &[na::Point2::new(cell_size * 0.5, cell_size),
+              na::Point2::new(cell_size * 0.5, cell_size * 0.75)
+            ]
+            , 4.0
+            , RED.into()
+        ).unwrap()
+        .build(ctx).unwrap();
+
+        let right_up = ggez::graphics::MeshBuilder::new()
+        .line(
+            &[na::Point2::new(cell_size, cell_size * 0.5),
+              na::Point2::new(cell_size * 0.5, 0.0)
+            ]
+            , 4.0
+            , RED.into()
+        ).unwrap()
+        .line(
+            &[na::Point2::new(cell_size * 0.5, 0.0),
+              na::Point2::new(cell_size * 0.75, 0.0)
+            ]
+            , 4.0
+            , RED.into()
+        ).unwrap()
+        .line(
+            &[na::Point2::new(cell_size * 0.5, 0.0),
+              na::Point2::new(cell_size * 0.5, cell_size * 0.25)
+            ]
+            , 4.0
+            , RED.into()
+        ).unwrap()
+        .build(ctx).unwrap();
+
         State {
-            stage: Stage::Initial,
+            mode: Mode::StepByStep,
+            buttons: Buttons {
+                space: false,
+                right: false,
+                left: false,
+            },
             screen: Screen {
                 assets: Assets {
                     black_cell,
                     white_cell,
                     right_roads,
-                    left_roads
+                    left_roads,
+                    down_left,
+                    down_right,
+                    up_left,
+                    up_right,
+                    left_down,
+                    left_up,
+                    right_down,
+                    right_up,
                 }
                 , pix_dim
                 , dim
                 , cell_size
                 , center_coord
-                , steps_per_frame: 1
             },
             update: Update {
                 cells: Cells::All,
@@ -179,6 +398,12 @@ impl State {
 
     fn step(&mut self) {
         let (board_i, board_j) = self.ant.coord;
+        let (screen_i, screen_j) = self.board_to_screen(board_i, board_j);
+        match &mut self.update.cells {
+            Cells::Some(ref mut v) => v.push((screen_i, screen_j)),
+            _ => {},
+        }
+
         if self.board.contains(&(board_i, board_j)) {
             match &self.ant.or {
                 Orientation::Up => self.ant.or = Orientation::Left,
@@ -225,11 +450,84 @@ impl State {
             self.update.cells = Cells::All;
         }
 
+        let (board_i, board_j) = self.ant.coord;
         let (screen_i, screen_j) = self.board_to_screen(board_i, board_j);
         match &mut self.update.cells {
-            Cells::Some(ref mut v) => {v.push((screen_i, screen_j))},
+            Cells::Some(ref mut v) => v.push((screen_i, screen_j)),
             _ => {},
         }
+
+        self.update.ant = true;
+    }
+
+    fn step_back(&mut self) {
+        let (board_i, board_j) = self.ant.coord;
+        let (screen_i, screen_j) = self.board_to_screen(board_i, board_j);
+        match &mut self.update.cells {
+            Cells::Some(ref mut v) => {
+                v.push((screen_i, screen_j));
+                v.push((screen_i - 1, screen_j));
+                v.push((screen_i + 1, screen_j));
+                v.push((screen_i, screen_j - 1));
+                v.push((screen_i, screen_j + 1));
+            },
+            _ => {},
+        }
+
+        // шагаем
+        match &self.ant.or {
+            Orientation::Up => self.ant.coord.1 += 1,
+            Orientation::Left => self.ant.coord.0 += 1,
+            Orientation::Down => self.ant.coord.1 -= 1,
+            Orientation::Right => self.ant.coord.0 -= 1,
+        }
+
+        let (board_i, board_j) = self.ant.coord;
+        if self.board.contains(&(board_i, board_j)) {
+            match &self.ant.or {
+                Orientation::Up => self.ant.or = Orientation::Left,
+                Orientation::Left => self.ant.or = Orientation::Down,
+                Orientation::Down => self.ant.or = Orientation::Right,
+                Orientation::Right => self.ant.or = Orientation::Up,
+            }
+
+            self.board.remove(&(board_i, board_j));
+        } else {
+            match &self.ant.or {
+                Orientation::Up => self.ant.or = Orientation::Right,
+                Orientation::Left => self.ant.or = Orientation::Up,
+                Orientation::Down => self.ant.or = Orientation::Left,
+                Orientation::Right => self.ant.or = Orientation::Down,
+            }
+
+            self.board.insert((board_i, board_j));
+        }
+
+        let (new_screen_i, new_screen_j) = self.board_to_screen(self.ant.coord.0, self.ant.coord.1);
+        if new_screen_i < 0 {
+            self.screen.center_coord.0 -= 1;
+            self.update.cells = Cells::All;
+        }
+        if new_screen_i > self.screen.dim.0 {
+            self.screen.center_coord.0 += 1;
+            self.update.cells = Cells::All;
+        }
+        if new_screen_j < 0 {
+            self.screen.center_coord.1 -= 1;
+            self.update.cells = Cells::All;
+        }
+        if new_screen_j > self.screen.dim.1 {
+            self.screen.center_coord.1 += 1;
+            self.update.cells = Cells::All;
+        }
+
+        let (board_i, board_j) = self.ant.coord;
+        let (screen_i, screen_j) = self.board_to_screen(board_i, board_j);
+        match &mut self.update.cells {
+            Cells::Some(ref mut v) => v.push((screen_i, screen_j)),
+            _ => {},
+        }
+
         self.update.ant = true;
     }
 
@@ -265,16 +563,49 @@ impl State {
         let cell_size = self.screen.cell_size;
         let (board_i, board_j) = self.ant.coord;
         let (screen_i, screen_j) = self.board_to_screen(board_i, board_j);
-        let mesh = ggez::graphics::MeshBuilder::new()
-        .rectangle(
-            DrawMode::fill(),
-            graphics::Rect::new(0.0, 0.0, cell_size, cell_size),
-            graphics::WHITE,
-        )
-        .build(ctx)?;
-        graphics::draw(ctx, &mesh, graphics::DrawParam::default()
-        .dest(na::Point2::new(screen_i as f32 * cell_size, screen_j as f32 * cell_size))
-        .color(RED.into()))?;
+        // чётные - приходим сверху-снизу, уходим вправо-влево
+        // нечётные - приходим справа-слева, уходим вверх-вниз
+        if !self.board.contains(&(board_i, board_j)) {
+            // белый
+            match self.ant.or {
+                Orientation::Up => {
+                    graphics::draw(ctx, &self.screen.assets.down_right, graphics::DrawParam::default()
+                    .dest(na::Point2::new(screen_i as f32 * cell_size, screen_j as f32 * cell_size)))?;
+                },
+                Orientation::Right => {
+                    graphics::draw(ctx, &self.screen.assets.left_down, graphics::DrawParam::default()
+                    .dest(na::Point2::new(screen_i as f32 * cell_size, screen_j as f32 * cell_size)))?;
+                },
+                Orientation::Down => {
+                    graphics::draw(ctx, &self.screen.assets.up_left, graphics::DrawParam::default()
+                    .dest(na::Point2::new(screen_i as f32 * cell_size, screen_j as f32 * cell_size)))?;
+                },
+                Orientation::Left => {
+                    graphics::draw(ctx, &self.screen.assets.right_up, graphics::DrawParam::default()
+                    .dest(na::Point2::new(screen_i as f32 * cell_size, screen_j as f32 * cell_size)))?;
+                }
+            }
+        } else {
+            // чёрный
+            match self.ant.or {
+                Orientation::Up => {
+                    graphics::draw(ctx, &self.screen.assets.down_left, graphics::DrawParam::default()
+                    .dest(na::Point2::new(screen_i as f32 * cell_size, screen_j as f32 * cell_size)))?;
+                },
+                Orientation::Right => {
+                    graphics::draw(ctx, &self.screen.assets.left_up, graphics::DrawParam::default()
+                    .dest(na::Point2::new(screen_i as f32 * cell_size, screen_j as f32 * cell_size)))?;
+                },
+                Orientation::Down => {
+                    graphics::draw(ctx, &self.screen.assets.up_right, graphics::DrawParam::default()
+                    .dest(na::Point2::new(screen_i as f32 * cell_size, screen_j as f32 * cell_size)))?;
+                },
+                Orientation::Left => {
+                    graphics::draw(ctx, &self.screen.assets.right_down, graphics::DrawParam::default()
+                    .dest(na::Point2::new(screen_i as f32 * cell_size, screen_j as f32 * cell_size)))?;
+                }
+            }
+        }
 
         Ok(())
     }
@@ -285,8 +616,45 @@ impl ggez::event::EventHandler for State {
         const DESIRED_FPS: u32 = 30;
 
         while timer::check_update_time(ctx, DESIRED_FPS) {
-            for _ in 0..self.screen.steps_per_frame {
-                self.step();
+            if !keyboard::is_key_pressed(ctx, KeyCode::Space) && self.buttons.space {
+                self.buttons.space = false;
+            }
+
+            if !keyboard::is_key_pressed(ctx, KeyCode::Right) && self.buttons.right {
+                self.buttons.right = false;
+            }
+
+            if !keyboard::is_key_pressed(ctx, KeyCode::Left) && self.buttons.left {
+                self.buttons.left = false;
+            }
+
+            match self.mode {
+                Mode::Stream(steps_per_frame) => {
+                    for _ in 0..steps_per_frame {
+                        self.step();
+                    }
+
+                    if keyboard::is_key_pressed(ctx, KeyCode::Space) && !self.buttons.space {
+                        self.buttons.space = true;
+                        self.mode = Mode::StepByStep;
+                    }
+                },
+                Mode::StepByStep => {
+                    if keyboard::is_key_pressed(ctx, KeyCode::Right) && !self.buttons.right {
+                        self.buttons.right = true;
+                        self.step();
+                    }
+
+                    if keyboard::is_key_pressed(ctx, KeyCode::Left) && !self.buttons.left {
+                        self.buttons.left = true;
+                        self.step_back();
+                    }
+
+                    if keyboard::is_key_pressed(ctx, KeyCode::Space) && !self.buttons.space {
+                        self.buttons.space = true;
+                        self.mode = Mode::Stream(10);
+                    }
+                }
             }
         }
 
