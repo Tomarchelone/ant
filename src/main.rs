@@ -1,9 +1,13 @@
 use ggez::*;
 use ggez::conf::{FullscreenType};
 
-pub mod lib_ant;
+pub mod lib;
+pub mod ant;
+pub mod engineer;
 
-use lib_ant::*;
+use lib::*;
+use crate::ant::*;
+use crate::engineer::*;
 
 // типаж, который рисует доску с муравьём
 // Новад доска с новыми правилами
@@ -21,11 +25,11 @@ pub fn main() {
     window_mode.height = h;
     window_mode.fullscreen_type = FullscreenType::True;
     c = c.window_mode(window_mode);
-    //c.window_setup.vsync = true;
 
     let (ref mut ctx, ref mut event_loop) = ContextBuilder::new("Ant", "Tomarchelone")
         .conf(c).build().unwrap();
-    let state = &mut State::new(ctx, short_dim);
+    graphics::set_window_title(ctx, "Ant");
+    let state = &mut State::<EngineerWalker>::new(ctx, short_dim);
 
     event::run(ctx, event_loop, state).unwrap();
 

@@ -5,6 +5,8 @@ use ggez::graphics::{self, DrawMode, Mesh};
 use ggez::event::{EventHandler, KeyCode, KeyMods};
 use ggez::input::keyboard;
 
+use crate::lib::*;
+
 const PURPLE: [f32; 4] = [0.4, 0.0, 0.2, 1.0];
 const PAPER: [f32; 4] = [0.8, 0.8, 0.6, 1.0];
 const RED: [f32; 4] = [0.8, 0.0, 0.0, 1.0];
@@ -40,15 +42,10 @@ struct Assets {
 
 pub struct Screen {
     assets: Assets,
-    pix_dim: (f32, f32),
+    resolution: (f32, f32),
     dim: (i64, i64),
     cell_size: f32,
     center_coord: (i64, i64),
-}
-
-pub enum Mode {
-    Stream(u64),
-    StepByStep,
 }
 
 enum Cells {
@@ -61,28 +58,115 @@ pub struct Update {
     ant: bool,
 }
 
-pub struct Buttons {
-    space: bool,
-    right: bool,
-    left: bool,
-}
-
-pub struct State {
-    mode: Mode,
-    buttons: Buttons,
+pub struct AntWalker {
     screen: Screen,
     update: Update,
     board: HashSet<(i64, i64)>,
     ant: Ant,
 }
 
-impl State {
-    pub fn new(ctx: &mut Context, short_dim: i64) -> Self {
-        let window_resolution = (ctx.conf.window_mode.width, ctx.conf.window_mode.height);
-        let pix_dim = (window_resolution.0, window_resolution.1);
-        let long_dim = (short_dim as f32 * (pix_dim.0 / pix_dim.1)) as i64;
-        let dim = (long_dim, short_dim);
-        let cell_size = pix_dim.0 / dim.0 as f32;
+impl AntWalker {
+    fn board_to_screen(&self, board_i: i64, board_j: i64) -> (i64, i64) {
+        // кординаты центра доски с точки зрения верхнего левого угла
+        let (cx, cy) = ((self.screen.dim.0 / 2) as i64, (self.screen.dim.1 / 2) as i64);
+        // координаты центра с точки зрения (0, 0) доски
+        let (cent_x, cent_y) = self.screen.center_coord;
+        (board_i + cx - cent_x, board_j + cy - cent_y)
+    }
+
+    fn screen_to_board(&self, screen_i: i64, screen_j: i64) -> (i64, i64) {
+        // кординаты центра доски с точки зрения верхнего левого угла
+        let (cx, cy) = ((self.screen.dim.0 / 2) as i64, (self.screen.dim.1 / 2) as i64);
+        // координаты центра с точки зрения (0, 0) доски
+        let (cent_x, cent_y) = self.screen.center_coord;
+        (screen_i - cx + cent_x, screen_j - cy + cent_y)
+    }
+
+    fn draw_cell(&self, ctx: &mut Context, screen_i: i64, screen_j: i64) -> GameResult {
+        let cell_size = self.screen.cell_size;
+        let board_idxes = self.screen_to_board(screen_i, screen_j);
+        let (board_i, board_j) = self.screen_to_board(screen_i, screen_j);
+
+        let mut roads_switch: i64 = 0;
+        roads_switch += (board_i + board_j) % 2;
+
+        if self.board.contains(&board_idxes) {
+            roads_switch += 1;
+            graphics::draw(ctx, &self.screen.assets.black_cell, graphics::DrawParam::default()
+            .dest(na::Point2::new(screen_i as f32 * cell_size, screen_j as f32 * cell_size)))?;
+        } else {
+            graphics::draw(ctx, &self.screen.assets.white_cell, graphics::DrawParam::default()
+            .dest(na::Point2::new(screen_i as f32 * cell_size, screen_j as f32 * cell_size)))?;
+        }
+
+        if roads_switch % 2 == 0 {
+            graphics::draw(ctx, &self.screen.assets.right_roads, graphics::DrawParam::default()
+            .dest(na::Point2::new(screen_i as f32 * cell_size, screen_j as f32 * cell_size)))?;
+        } else {
+            graphics::draw(ctx, &self.screen.assets.left_roads, graphics::DrawParam::default()
+            .dest(na::Point2::new(screen_i as f32 * cell_size, screen_j as f32 * cell_size)))?;
+        }
+
+        Ok(())
+    }
+
+    fn draw_ant(&self, ctx: &mut Context) -> GameResult {
+        let cell_size = self.screen.cell_size;
+        let (board_i, board_j) = self.ant.coord;
+        let (screen_i, screen_j) = self.board_to_screen(board_i, board_j);
+        // чётные - приходим сверху-снизу, уходим вправо-влево
+        // нечётные - приходим справа-слева, уходим вверх-вниз
+        if !self.board.contains(&(board_i, board_j)) {
+            // белый
+            match self.ant.or {
+                Orientation::Up => {
+                    graphics::draw(ctx, &self.screen.assets.down_right, graphics::DrawParam::default()
+                    .dest(na::Point2::new(screen_i as f32 * cell_size, screen_j as f32 * cell_size)))?;
+                },
+                Orientation::Right => {
+                    graphics::draw(ctx, &self.screen.assets.left_down, graphics::DrawParam::default()
+                    .dest(na::Point2::new(screen_i as f32 * cell_size, screen_j as f32 * cell_size)))?;
+                },
+                Orientation::Down => {
+                    graphics::draw(ctx, &self.screen.assets.up_left, graphics::DrawParam::default()
+                    .dest(na::Point2::new(screen_i as f32 * cell_size, screen_j as f32 * cell_size)))?;
+                },
+                Orientation::Left => {
+                    graphics::draw(ctx, &self.screen.assets.right_up, graphics::DrawParam::default()
+                    .dest(na::Point2::new(screen_i as f32 * cell_size, screen_j as f32 * cell_size)))?;
+                }
+            }
+        } else {
+            // чёрный
+            match self.ant.or {
+                Orientation::Up => {
+                    graphics::draw(ctx, &self.screen.assets.down_left, graphics::DrawParam::default()
+                    .dest(na::Point2::new(screen_i as f32 * cell_size, screen_j as f32 * cell_size)))?;
+                },
+                Orientation::Right => {
+                    graphics::draw(ctx, &self.screen.assets.left_up, graphics::DrawParam::default()
+                    .dest(na::Point2::new(screen_i as f32 * cell_size, screen_j as f32 * cell_size)))?;
+                },
+                Orientation::Down => {
+                    graphics::draw(ctx, &self.screen.assets.up_right, graphics::DrawParam::default()
+                    .dest(na::Point2::new(screen_i as f32 * cell_size, screen_j as f32 * cell_size)))?;
+                },
+                Orientation::Left => {
+                    graphics::draw(ctx, &self.screen.assets.right_down, graphics::DrawParam::default()
+                    .dest(na::Point2::new(screen_i as f32 * cell_size, screen_j as f32 * cell_size)))?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl Walker for AntWalker {
+    fn new(resolution: (f32, f32), dim: i64, ctx: &mut Context) -> Self {
+        let long_dim = (dim as f32 * (resolution.0 / resolution.1)) as i64;
+        let dim = (long_dim, dim);
+        let cell_size = resolution.0 / dim.0 as f32;
         let center_coord = (0, 0);
 
         let black_cell = ggez::graphics::MeshBuilder::new()
@@ -337,13 +421,7 @@ impl State {
         ).unwrap()
         .build(ctx).unwrap();
 
-        State {
-            mode: Mode::StepByStep,
-            buttons: Buttons {
-                space: false,
-                right: false,
-                left: false,
-            },
+        AntWalker {
             screen: Screen {
                 assets: Assets {
                     black_cell,
@@ -359,7 +437,7 @@ impl State {
                     right_down,
                     right_up,
                 }
-                , pix_dim
+                , resolution
                 , dim
                 , cell_size
                 , center_coord
@@ -374,26 +452,6 @@ impl State {
                 , or: Orientation::Up
             }
         }
-    }
-
-    pub fn pix_dim(&self) -> (f32, f32) {
-        self.screen.pix_dim
-    }
-
-    fn board_to_screen(&self, board_i: i64, board_j: i64) -> (i64, i64) {
-        // кординаты центра доски с точки зрения верхнего левого угла
-        let (cx, cy) = ((self.screen.dim.0 / 2) as i64, (self.screen.dim.1 / 2) as i64);
-        // координаты центра с точки зрения (0, 0) доски
-        let (cent_x, cent_y) = self.screen.center_coord;
-        (board_i + cx - cent_x, board_j + cy - cent_y)
-    }
-
-    fn screen_to_board(&self, screen_i: i64, screen_j: i64) -> (i64, i64) {
-        // кординаты центра доски с точки зрения верхнего левого угла
-        let (cx, cy) = ((self.screen.dim.0 / 2) as i64, (self.screen.dim.1 / 2) as i64);
-        // координаты центра с точки зрения (0, 0) доски
-        let (cent_x, cent_y) = self.screen.center_coord;
-        (screen_i - cx + cent_x, screen_j - cy + cent_y)
     }
 
     fn step(&mut self) {
@@ -531,136 +589,6 @@ impl State {
         self.update.ant = true;
     }
 
-    fn draw_cell(&self, ctx: &mut Context, screen_i: i64, screen_j: i64) -> GameResult {
-        let cell_size = self.screen.cell_size;
-        let board_idxes = self.screen_to_board(screen_i, screen_j);
-        let (board_i, board_j) = self.screen_to_board(screen_i, screen_j);
-
-        let mut roads_switch: i64 = 0;
-        roads_switch += (board_i + board_j) % 2;
-
-        if self.board.contains(&board_idxes) {
-            roads_switch += 1;
-            graphics::draw(ctx, &self.screen.assets.black_cell, graphics::DrawParam::default()
-            .dest(na::Point2::new(screen_i as f32 * cell_size, screen_j as f32 * cell_size)))?;
-        } else {
-            graphics::draw(ctx, &self.screen.assets.white_cell, graphics::DrawParam::default()
-            .dest(na::Point2::new(screen_i as f32 * cell_size, screen_j as f32 * cell_size)))?;
-        }
-
-        if roads_switch % 2 == 0 {
-            graphics::draw(ctx, &self.screen.assets.right_roads, graphics::DrawParam::default()
-            .dest(na::Point2::new(screen_i as f32 * cell_size, screen_j as f32 * cell_size)))?;
-        } else {
-            graphics::draw(ctx, &self.screen.assets.left_roads, graphics::DrawParam::default()
-            .dest(na::Point2::new(screen_i as f32 * cell_size, screen_j as f32 * cell_size)))?;
-        }
-
-        Ok(())
-    }
-
-    fn draw_ant(&self, ctx: &mut Context) -> GameResult {
-        let cell_size = self.screen.cell_size;
-        let (board_i, board_j) = self.ant.coord;
-        let (screen_i, screen_j) = self.board_to_screen(board_i, board_j);
-        // чётные - приходим сверху-снизу, уходим вправо-влево
-        // нечётные - приходим справа-слева, уходим вверх-вниз
-        if !self.board.contains(&(board_i, board_j)) {
-            // белый
-            match self.ant.or {
-                Orientation::Up => {
-                    graphics::draw(ctx, &self.screen.assets.down_right, graphics::DrawParam::default()
-                    .dest(na::Point2::new(screen_i as f32 * cell_size, screen_j as f32 * cell_size)))?;
-                },
-                Orientation::Right => {
-                    graphics::draw(ctx, &self.screen.assets.left_down, graphics::DrawParam::default()
-                    .dest(na::Point2::new(screen_i as f32 * cell_size, screen_j as f32 * cell_size)))?;
-                },
-                Orientation::Down => {
-                    graphics::draw(ctx, &self.screen.assets.up_left, graphics::DrawParam::default()
-                    .dest(na::Point2::new(screen_i as f32 * cell_size, screen_j as f32 * cell_size)))?;
-                },
-                Orientation::Left => {
-                    graphics::draw(ctx, &self.screen.assets.right_up, graphics::DrawParam::default()
-                    .dest(na::Point2::new(screen_i as f32 * cell_size, screen_j as f32 * cell_size)))?;
-                }
-            }
-        } else {
-            // чёрный
-            match self.ant.or {
-                Orientation::Up => {
-                    graphics::draw(ctx, &self.screen.assets.down_left, graphics::DrawParam::default()
-                    .dest(na::Point2::new(screen_i as f32 * cell_size, screen_j as f32 * cell_size)))?;
-                },
-                Orientation::Right => {
-                    graphics::draw(ctx, &self.screen.assets.left_up, graphics::DrawParam::default()
-                    .dest(na::Point2::new(screen_i as f32 * cell_size, screen_j as f32 * cell_size)))?;
-                },
-                Orientation::Down => {
-                    graphics::draw(ctx, &self.screen.assets.up_right, graphics::DrawParam::default()
-                    .dest(na::Point2::new(screen_i as f32 * cell_size, screen_j as f32 * cell_size)))?;
-                },
-                Orientation::Left => {
-                    graphics::draw(ctx, &self.screen.assets.right_down, graphics::DrawParam::default()
-                    .dest(na::Point2::new(screen_i as f32 * cell_size, screen_j as f32 * cell_size)))?;
-                }
-            }
-        }
-
-        Ok(())
-    }
-}
-
-impl ggez::event::EventHandler for State {
-    fn update(&mut self, ctx: &mut Context) -> GameResult {
-        const DESIRED_FPS: u32 = 30;
-
-        while timer::check_update_time(ctx, DESIRED_FPS) {
-            if !keyboard::is_key_pressed(ctx, KeyCode::Space) && self.buttons.space {
-                self.buttons.space = false;
-            }
-
-            if !keyboard::is_key_pressed(ctx, KeyCode::Right) && self.buttons.right {
-                self.buttons.right = false;
-            }
-
-            if !keyboard::is_key_pressed(ctx, KeyCode::Left) && self.buttons.left {
-                self.buttons.left = false;
-            }
-
-            match self.mode {
-                Mode::Stream(steps_per_frame) => {
-                    for _ in 0..steps_per_frame {
-                        self.step();
-                    }
-
-                    if keyboard::is_key_pressed(ctx, KeyCode::Space) && !self.buttons.space {
-                        self.buttons.space = true;
-                        self.mode = Mode::StepByStep;
-                    }
-                },
-                Mode::StepByStep => {
-                    if keyboard::is_key_pressed(ctx, KeyCode::Right) && !self.buttons.right {
-                        self.buttons.right = true;
-                        self.step();
-                    }
-
-                    if keyboard::is_key_pressed(ctx, KeyCode::Left) && !self.buttons.left {
-                        self.buttons.left = true;
-                        self.step_back();
-                    }
-
-                    if keyboard::is_key_pressed(ctx, KeyCode::Space) && !self.buttons.space {
-                        self.buttons.space = true;
-                        self.mode = Mode::Stream(10);
-                    }
-                }
-            }
-        }
-
-        Ok(())
-    }
-
     fn draw(&mut self, ctx: &mut Context) -> GameResult {
         match self.update.cells {
             Cells::Some(ref cells) => {
@@ -685,10 +613,7 @@ impl ggez::event::EventHandler for State {
             self.update.ant = false;
         }
 
-
         graphics::present(ctx)?;
         Ok(())
     }
-
-
 }
